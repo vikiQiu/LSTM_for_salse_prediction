@@ -1,93 +1,90 @@
-# python: 2.7.12
-# tensorflow: 0.12.0-rc1
+__author__ = 'VikiQiu'
+# https://github.com/aymericdamien/TensorFlow-Examples/blob/0.11/examples/3_NeuralNetworks/recurrent_network.py
+# https://github.com/vikiQiu/LSTM_for_salse_prediction
 
 import tensorflow as tf
+from tensorflow.python.ops import rnn, rnn_cell
 import inputData
-import numpy as np
-import test
-from params import *
+
+# Parameters
+learning_rate = 0.1
+training_iters = 10000
+batch_size = 1
+display_step = 10
+
+# Network Parameters
+input_dimension = 1 # MNIST data input (img shape: 28*28)
+sequence_len = 5 # timesteps
+n_hidden = 128 # hidden layer num of features
+output_dimension = 10 # MNIST total classes (0-9 digits)
 
 # read data
 filename = 'sales001.csv'
-trainX, trainY, testX, testY = inputData.getLstmData(filename, input_dimension, output_dimension)
+trainX, trainY, testX, testY = inputData.getLstmData(filename, sequence_len, output_dimension)
 tmpTest = testX.tolist()
 
-# nTest = len(inputX) - nPre
-# nVal = len(inputX) - 2*nPre
-# trainX, trainY = inputX[:nVal], inputY[:nVal]
-# valX, valY = inputX[nVal:nTest], inputY[nVal:nTest]
-# testX, testY = inputX[nTest:], inputY[nTest:]
+# tf Graph input
+x = tf.placeholder("float", [None, sequence_len, input_dimension])
+y = tf.placeholder("float", [None, output_dimension])
 
-X = tf.placeholder(tf.float32, [batch_size, sequence_len, input_dimension])
-Y = tf.placeholder(tf.float32, [batch_size, sequence_len, output_dimension])
-
-# LSTM part
-cell = tf.nn.rnn_cell.BasicLSTMCell(num_units)
-val, state = tf.nn.dynamic_rnn(cell, X, dtype=tf.float32)
-
-# linear part
-W = tf.Variable(tf.truncated_normal([batch_size, output_dimension, output_dimension]))
-b = tf.Variable(tf.constant(0.5, shape = [batch_size, output_dimension]))
-prediction = tf.matmul(val, W) + b
-loss = tf.reduce_mean(tf.abs(Y - prediction) / (Y + prediction))
-
-# optimizer
-optimizer1 = tf.train.AdamOptimizer(learning_rate = 0.5)
-minimize1 =optimizer1.minimize(loss)
-optimizer2 = tf.train.AdamOptimizer(learning_rate = 0.05)
-minimize2 =optimizer2.minimize(loss)
-
-# summary
-summaries = [tf.scalar_summary('loss', loss), tf.histogram_summary('W', W), tf.histogram_summary('b', b)]
-summary_op = tf.merge_summary(summaries)
-
-# error
-preY = prediction[0,sequence_len-1, 0]
-targetY = Y[0,sequence_len-1, 0]
-train_error = tf.abs(targetY - preY) / (targetY + preY)
+# Define weights
+weights = {
+    'out': tf.Variable(tf.random_normal([n_hidden, output_dimension]))
+}
+biases = {
+    'out': tf.Variable(tf.random_normal([output_dimension]))
+}
 
 
-init_op = tf.initialize_all_variables()
-sess = tf.Session()
-sess.run(init_op)
-summary_writer = tf.train.SummaryWriter('./log', graph_def=sess.graph_def)
+def RNN(x, weights, biases):
+    x = tf.unstack(x, sequence_len, 1)
+    # Define a lstm cell with tensorflow
+    lstm_cell = rnn_cell.BasicLSTMCell(n_hidden, forget_bias=1.0)
 
-epoch = 100
-nTrainX = len(trainX)
-num_seq = int(nTrainX / sequence_len)
-minimize = minimize1
-for i in range(epoch):
-    ptr = 0
-    losses = []
-    for j in range(num_seq):
-        inp= trainX[ptr:ptr+sequence_len].reshape(batch_size, sequence_len, -1)
-        out = trainY[ptr:ptr+sequence_len].reshape(batch_size, sequence_len, -1)
-        ptr += sequence_len
-        sess.run(minimize, feed_dict = {X: inp, Y: out})
-        losses.append(sess.run(loss, feed_dict = {X: inp, Y: out}))
-        summary_str = sess.run(summary_op, feed_dict = {X: inp, Y: out})
-        summary_writer.add_summary(summary_str, global_step=1)
-    m_loss = sess.run(tf.reduce_mean(losses))
-    # train error
-    inp = trainX[nTrainX-sequence_len:nTrainX].reshape(batch_size, sequence_len, -1)
-    out = trainY[nTrainX-sequence_len:nTrainX].reshape(batch_size, sequence_len, -1)
-    print("Epoch - ", str(i), m_loss, sess.run(train_error, feed_dict={X: inp, Y: out}))
-    # if(m_loss<0.1): minimize = minimize2
-    if(m_loss<0.01): break
+    # Get lstm cell output
+    outputs, states = rnn.rnn(lstm_cell, x, dtype=tf.float32)
 
-tePre = []
-teLosses = []
-for i in range(nPre):
-    nTest = len(tmpTest)
-    inp = np.array(tmpTest[nTest-sequence_len:nTest]).reshape(batch_size, sequence_len, -1)
-    tePre.append(sess.run(prediction, feed_dict={X: inp})[0, nPre-1, 0])
-    tmpTest.append([[tePre[i]]])
+    # Linear activation, using rnn inner loop last output
+    return tf.matmul(outputs[-1], weights['out']) + biases['out']
 
-    # teLosses.append(sess.run(train_error, feed_dict={X: inp, Y: out}))
-print('prediction:', tePre)
-# print('test loss:', sum(teLosses)/len(teLosses))
+pred = RNN(x, weights, biases)
 
+# Define loss and optimizer
+cost = tf.reduce_mean(tf.abs(y - pred) / (y + pred))
+optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(cost)
 
-sess.close()
+# Evaluate model
+accuracy = cost
 
+# Initializing the variables
+init = tf.initialize_all_variables()
 
+# Launch the graph
+with tf.Session() as sess:
+    sess.run(init)
+    step = 0
+    nTrain = len(trainX)
+    # Keep training until reach max iterations
+    while step * batch_size < nTrain:
+        endInd = min(nTrain, (step+1)*batch_size)
+        batch_x = trainX[step*batch_size:endInd].reshape(-1, sequence_len, input_dimension)
+        batch_y = trainY[step*batch_size:endInd]
+        # Run optimization op (backprop)
+        sess.run(optimizer, feed_dict={x: batch_x, y: batch_y})
+        if step % display_step == 0:
+            # Calculate batch accuracy
+            acc = sess.run(accuracy, feed_dict={x: batch_x, y: batch_y})
+            # Calculate batch loss
+            loss = sess.run(cost, feed_dict={x: batch_x, y: batch_y})
+            print("Iter " + str(step*batch_size) + ", Minibatch Loss= " + \
+                  "{:.6f}".format(loss) + ", Training Accuracy= " + \
+                  "{:.5f}".format(acc))
+        step += 1
+    print("Optimization Finished!")
+
+    # Calculate accuracy for 128 mnist test images
+    # test_len = 128
+    # test_data = mnist.test.images[:test_len].reshape((-1, sequence_len, input_dimension))
+    # test_label = mnist.test.labels[:test_len]
+    # print("Testing Accuracy:", \
+    #     sess.run(accuracy, feed_dict={x: test_data, y: test_label}))
