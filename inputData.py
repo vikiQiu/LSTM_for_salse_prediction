@@ -8,7 +8,7 @@ def getData(filename):
     data = []
     f.readline()
     for line in f.readlines():
-        data.append(int(line.strip()))
+        data.append(float(line.strip()))
     f.close()
     return data
 
@@ -29,8 +29,8 @@ def getLstmData(filename, sequence_len, output_dimension = 1, nPre = nPre):
     n = len(X)
     return X[:n-nPre], Y[:n-nPre], X[n-nPre], Y[n-nPre:]
 
-filename = 'sales001.csv'
-X, Y, tX, tY = getLstmData(filename, sequence_len, output_dimension)
-print(X.shape, Y.shape, tX.shape, tY.shape)
+# filename = 'data/sales001.csv'
+# X, Y, tX, tY = getLstmData(filename, sequence_len, output_dimension)
+# print(X.shape, Y.shape, tX.shape, tY.shape)
 # print(X[0:2], Y[0])
 # print(tX[len(tX)-1], tY)
